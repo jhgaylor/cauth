@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Select a persistent Claude Code profile, then replace this process with Claude."""
+
+import os
+from pathlib import Path
+import re
+import shutil
+import sys
+
+
+HELP = """Usage:
+  ournewcli -account NAME claude [CLAUDE_ARGUMENTS...]
+  ournewcli -account NAME login [--email EMAIL]
+  ournewcli -account NAME status
+  ournewcli -account NAME logout
+  ournewcli list
+
+Examples:
+  ournewcli -account first-account login --email you@example.com
+  ournewcli -account first-account claude -p "my prompt"
+  ournewcli -account second-account claude
+
+Also accepts --account and -a. Each account gets its own Claude configuration,
+login, history, and settings. Claude manages authentication and refresh itself.
+Profiles live in ${XDG_CONFIG_HOME:-~/.config}/ournewcli/accounts by default.
+Set OURNEWCLI_HOME to an absolute directory to change the storage root.
+The selected profile stays selected for the entire command.
+"""
+
+# These can override the profile login or redirect its requests. Report names
+# only: never include credential values in diagnostics.
+AUTH_OVERRIDES = {
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_IDENTITY_TOKEN_FILE",
+    "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+    "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+}
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+
+
+def fail(message, code=2):
+    print(f"ournewcli: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def root_dir():
+    configured = os.environ.get("OURNEWCLI_HOME")
+    if configured:
+        root = Path(configured).expanduser()
+    else:
+        config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+        root = config / "ournewcli"
+    if not root.is_absolute():
+        fail("OURNEWCLI_HOME and XDG_CONFIG_HOME must be absolute paths")
+    return root.resolve() / "accounts"
+
+
+def main(args):
+    if not args or args in (["--help"], ["-h"]):
+        print(HELP, end="")
+        return
+    root = root_dir()
+    if args == ["list"]:
+        if root.exists():
+            for path in sorted(root.iterdir()):
+                if NAME.fullmatch(path.name) and path.is_dir() and not path.is_symlink():
+                    print(path.name)
+        return
+    if len(args) < 3 or args[0] not in ("-account", "--account", "-a"):
+        fail("expected -account NAME followed by claude, login, status, or logout; see --help")
+    account, command, *tail = args[1:]
+    if not NAME.fullmatch(account):
+        fail("account names must be 1–64 letters, digits, underscores, or hyphens, starting with a letter or digit")
+    if command == "claude":
+        child_args = tail
+    elif command == "login":
+        if tail and (len(tail) != 2 or tail[0] != "--email" or not tail[1]):
+            fail("login accepts only --email EMAIL; use claude auth login for other options")
+        child_args = ["auth", "login", "--claudeai", *tail]
+    elif command in ("status", "logout") and not tail:
+        child_args = ["auth", command]
+    else:
+        fail("expected claude, login, status, or logout; see --help")
+
+    conflicts = sorted(key for key, value in os.environ.items() if value and (
+        key in AUTH_OVERRIDES or key.startswith("CLAUDE_CODE_USE_")
+    ))
+    if conflicts:
+        fail("unset authentication/routing overrides before selecting an account: " + ", ".join(conflicts))
+    executable = shutil.which("claude")
+    if not executable:
+        fail("claude is not on PATH; install Claude Code first", 127)
+
+    # Do not copy or modify ~/.claude, its credentials, or the default Keychain
+    # entry. Config-dir names also distinguish Claude's macOS Keychain entries.
+    profile = root / account
+    if profile.is_symlink():
+        fail("profile directory must not be a symbolic link")
+    creating = command == "login" or (command == "claude" and tail[:2] == ["auth", "login"])
+    if not profile.exists() and not creating:
+        fail(f"unknown account '{account}'; run ournewcli -account {account} login first")
+    os.umask(0o077)
+    if creating:
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        profile.mkdir(exist_ok=True, mode=0o700)
+    if not profile.is_dir():
+        fail("profile path is not a directory")
+    if profile.stat().st_mode & 0o077:
+        fail("profile directory permissions must be 0700; restrict its permissions before continuing")
+    env = os.environ.copy()
+    env["CLAUDE_CONFIG_DIR"] = str(profile)
+    # No shell command construction; prompts, stdin, TTY, signals and exit
+    # status pass directly to Claude. Parallel selections cannot race over
+    # a shared 'current account' pointer.
+    os.execvpe(executable, [executable, *child_args], env)
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except OSError as error:
+        fail(str(error), 1)
