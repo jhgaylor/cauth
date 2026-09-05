@@ -37,6 +37,30 @@ Run that command from the cloned repository and keep the clone in place.
 Ensure `~/.local/bin` is on your shell's `PATH`. The symlink command deliberately
 fails if a launcher with that name already exists.
 
+Create a shortcut for an account:
+
+```sh
+cauth -account first-account alias c1
+cauth -account second-account alias c2
+export PATH="$HOME/.local/bin:$PATH"
+c1 -p "my prompt"
+c2 -p "another prompt"
+```
+
+These are executable launchers, so they work in zsh, bash, and other shells.
+They forward all arguments to `claude` using the selected account; `c1` alone
+starts an interactive session, and `c1 auth status` checks its login. Install
+one after creating the account profile with `login`. Set `CAUTH_BIN_DIR` to an
+absolute directory to install somewhere other than `~/.local/bin`. Add that
+directory to your shell startup file's PATH for use in new terminals.
+
+An alias stores the account name, profile root, and absolute paths to this
+checkout's launcher and Python interpreter. Keep the checkout and interpreter
+in place. It contains no tokens. Existing files, symlinks, and executable names
+on PATH are never overwritten; shell functions and shell aliases cannot be
+detected by this process. To remove a shortcut, delete its installed file
+(e.g. `rm ~/.local/bin/c1`), then recreate it if changing the account or location.
+
 Profiles default to `~/.config/cauth/accounts/NAME`, respecting
 `XDG_CONFIG_HOME`. `CAUTH_HOME` overrides the root. Keep this path stable:
 Claude also derives its macOS Keychain entry from the config directory.

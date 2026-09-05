@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import sys
 
 
@@ -13,17 +14,21 @@ HELP = """Usage:
   cauth -account NAME login [--email EMAIL]
   cauth -account NAME status
   cauth -account NAME logout
+  cauth -account NAME alias COMMAND
   cauth list
 
 Examples:
   cauth -account first-account login --email you@example.com
   cauth -account first-account claude -p "my prompt"
+  cauth -account first-account alias c1
+  c1 -p "my prompt"
   cauth -account second-account claude
 
 Also accepts --account and -a. Each account gets its own Claude configuration,
 login, history, and settings. Claude manages authentication and refresh itself.
 Profiles live in ${XDG_CONFIG_HOME:-~/.config}/cauth/accounts by default.
 Set CAUTH_HOME to an absolute directory to change the storage root.
+Aliases install in ~/.local/bin; set CAUTH_BIN_DIR to override that directory.
 The selected profile stays selected for the entire command.
 """
 
@@ -61,6 +66,39 @@ def root_dir():
     return root.resolve() / "accounts"
 
 
+def install_alias(root, account, name):
+    if not NAME.fullmatch(name) or name in {"cauth", "claude"}:
+        fail("alias must be 1–64 letters, digits, underscores, or hyphens, starting with a letter or digit; cauth and claude are reserved")
+    profile = root / account
+    if profile.is_symlink() or not profile.is_dir():
+        fail(f"unknown or invalid account '{account}'; run cauth -account {account} login first")
+    directory = Path(os.environ.get("CAUTH_BIN_DIR") or Path.home() / ".local" / "bin").expanduser()
+    if not directory.is_absolute():
+        fail("CAUTH_BIN_DIR must be an absolute path")
+    directory = directory.resolve()
+    destination = directory / name
+    if os.path.lexists(destination) or shutil.which(name):
+        fail(f"command '{name}' already exists; choose another alias or remove the existing launcher first")
+    # Bind the profile root as well as its name so changing CAUTH_HOME later
+    # cannot silently select a different account. No credentials are embedded.
+    command = [sys.executable, str(Path(__file__).resolve()), "-account", account, "claude"]
+    script = "#!/bin/sh\nCAUTH_HOME=" + shlex.quote(str(root.parent)) + "\nexport CAUTH_HOME\n"
+    script += "exec " + " ".join(shlex.quote(arg) for arg in command) + ' "$@"\n'
+    directory.mkdir(parents=True, exist_ok=True)
+    # Exclusive creation also protects existing files/symlinks if they appear
+    # after the collision check. The executable never evaluates prompt text.
+    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+    with os.fdopen(fd, "w") as output:
+        output.write(script)
+        os.fchmod(output.fileno(), 0o700)
+    print(f"Installed {destination} for account '{account}'.")
+    path_dirs = {Path(part or os.curdir).expanduser().resolve()
+                 for part in os.environ.get("PATH", "").split(os.pathsep)}
+    if directory not in path_dirs:
+        print("Add its directory to your shell PATH:")
+        print("  export PATH=" + shlex.quote(str(directory)) + ':"$PATH"')
+
+
 def main(args):
     if not args or args in (["--help"], ["-h"]):
         print(HELP, end="")
@@ -73,10 +111,15 @@ def main(args):
                     print(path.name)
         return
     if len(args) < 3 or args[0] not in ("-account", "--account", "-a"):
-        fail("expected -account NAME followed by claude, login, status, or logout; see --help")
+        fail("expected -account NAME followed by claude, login, status, logout, or alias; see --help")
     account, command, *tail = args[1:]
     if not NAME.fullmatch(account):
         fail("account names must be 1–64 letters, digits, underscores, or hyphens, starting with a letter or digit")
+    if command == "alias":
+        if len(tail) != 1:
+            fail("alias requires one command name: cauth -account NAME alias c1")
+        install_alias(root, account, tail[0])
+        return
     if command == "claude":
         child_args = tail
     elif command == "login":
@@ -86,7 +129,7 @@ def main(args):
     elif command in ("status", "logout") and not tail:
         child_args = ["auth", command]
     else:
-        fail("expected claude, login, status, or logout; see --help")
+        fail("expected claude, login, status, logout, or alias; see --help")
 
     conflicts = sorted(key for key, value in os.environ.items() if value and (
         key in AUTH_OVERRIDES or key.startswith("CLAUDE_CODE_USE_")

@@ -112,6 +112,66 @@ sys.exit(int(os.environ.get("FIXTURE_EXIT", "0")))
         result = self.call("-a", "third", "login", env={**self.env, "OURNEWCLI_HOME": str(legacy)})
         self.assertEqual(Path(json.loads(result.stdout)["profile"]), (self.base / "profiles").resolve() / "accounts" / "third")
 
+    def test_alias_executes_selected_account_and_forwards_arguments(self):
+        self.login("first")
+        self.login("second")
+        env = {**self.env, "CAUTH_BIN_DIR": str(self.bin)}
+        for account, name in (("first", "c1"), ("second", "c2")):
+            result = self.call("-account", account, "alias", name, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = 'hello "quoted"; $(touch should-not-exist)\nsecond line'
+        for name, account in (("c1", "first"), ("c2", "second")):
+            result = subprocess.run([name, "-p", prompt, ""], input="stdin", capture_output=True,
+                                    text=True, cwd=self.base,
+                                    env={**env, "CAUTH_HOME": str(self.base / "wrong"), "FIXTURE_EXIT": "42"})
+            self.assertEqual(result.returncode, 42, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["args"], ["-p", prompt, ""])
+            self.assertEqual(data["stdin"], "stdin")
+            self.assertEqual(data["login"], account)
+            self.assertEqual(Path(data["cwd"]).resolve(), self.base.resolve())
+        self.assertFalse((self.base / "should-not-exist").exists())
+
+    def test_alias_default_directory_and_collisions(self):
+        self.login("first")
+        result = self.call("-a", "first", "alias", "c1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("export PATH=", result.stdout)
+        alias = self.base / ".local" / "bin" / "c1"
+        self.assertEqual(alias.stat().st_mode & 0o777, 0o700)
+        original = alias.read_bytes()
+        self.assertEqual(self.call("-a", "first", "alias", "c1").returncode, 2)
+        self.assertEqual(alias.read_bytes(), original)
+        (alias.parent / "dangling").symlink_to(self.base / "missing")
+        self.assertEqual(self.call("-a", "first", "alias", "dangling").returncode, 2)
+        existing = self.bin / "existing"
+        existing.write_text("#!/bin/sh\nexit 0\n")
+        existing.chmod(0o700)
+        self.assertEqual(self.call("-a", "first", "alias", "existing").returncode, 2)
+        for name in ("cauth", "claude", "../escape", "a/b", "", "a;echo", "-p"):
+            self.assertEqual(self.call("-a", "first", "alias", name).returncode, 2)
+        for args in (("-a", "missing", "alias", "c2"), ("-a", "first", "alias"),
+                     ("-a", "first", "alias", "c2", "extra")):
+            self.assertEqual(self.call(*args).returncode, 2)
+        self.assertEqual(self.call("-a", "first", "alias", "c2",
+                                  env={**self.env, "CAUTH_BIN_DIR": "relative"}).returncode, 2)
+
+    def test_alias_quotes_installation_and_profile_paths(self):
+        location = self.base / "space ' and $literal"
+        location.mkdir()
+        copied = location / "cauth"
+        copied.write_bytes(CLI.read_bytes())
+        env = {**self.env, "CAUTH_HOME": str(location / "profiles"),
+               "CAUTH_BIN_DIR": str(location / "bin")}
+        for args in (("login",), ("alias", "c1")):
+            result = subprocess.run([sys.executable, str(copied), "-a", "first", *args],
+                                    env=env, input="", capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run([str(location / "bin" / "c1"), "-p", "hi"], env=env,
+                                input="", capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["login"], "first")
+
     def test_missing_binary_and_invalid_invocations(self):
         (self.bin / "claude").unlink()
         self.assertEqual(self.call("-a", "first", "login").returncode, 127)
