@@ -9,21 +9,21 @@ import sys
 
 
 HELP = """Usage:
-  ournewcli -account NAME claude [CLAUDE_ARGUMENTS...]
-  ournewcli -account NAME login [--email EMAIL]
-  ournewcli -account NAME status
-  ournewcli -account NAME logout
-  ournewcli list
+  cauth -account NAME claude [CLAUDE_ARGUMENTS...]
+  cauth -account NAME login [--email EMAIL]
+  cauth -account NAME status
+  cauth -account NAME logout
+  cauth list
 
 Examples:
-  ournewcli -account first-account login --email you@example.com
-  ournewcli -account first-account claude -p "my prompt"
-  ournewcli -account second-account claude
+  cauth -account first-account login --email you@example.com
+  cauth -account first-account claude -p "my prompt"
+  cauth -account second-account claude
 
 Also accepts --account and -a. Each account gets its own Claude configuration,
 login, history, and settings. Claude manages authentication and refresh itself.
-Profiles live in ${XDG_CONFIG_HOME:-~/.config}/ournewcli/accounts by default.
-Set OURNEWCLI_HOME to an absolute directory to change the storage root.
+Profiles live in ${XDG_CONFIG_HOME:-~/.config}/cauth/accounts by default.
+Set CAUTH_HOME to an absolute directory to change the storage root.
 The selected profile stays selected for the entire command.
 """
 
@@ -40,19 +40,24 @@ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 
 
 def fail(message, code=2):
-    print(f"ournewcli: {message}", file=sys.stderr)
+    print(f"cauth: {message}", file=sys.stderr)
     raise SystemExit(code)
 
 
 def root_dir():
-    configured = os.environ.get("OURNEWCLI_HOME")
+    configured = os.environ.get("CAUTH_HOME") or os.environ.get("OURNEWCLI_HOME")
     if configured:
         root = Path(configured).expanduser()
     else:
         config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-        root = config / "ournewcli"
+        root = config / "cauth"
+        # Keep existing profiles at their original paths: macOS Keychain
+        # entries are tied to CLAUDE_CONFIG_DIR.
+        legacy = config / "ournewcli"
+        if not root.exists() and legacy.is_dir():
+            root = legacy
     if not root.is_absolute():
-        fail("OURNEWCLI_HOME and XDG_CONFIG_HOME must be absolute paths")
+        fail("CAUTH_HOME and XDG_CONFIG_HOME must be absolute paths")
     return root.resolve() / "accounts"
 
 
@@ -99,7 +104,7 @@ def main(args):
         fail("profile directory must not be a symbolic link")
     creating = command == "login" or (command == "claude" and tail[:2] == ["auth", "login"])
     if not profile.exists() and not creating:
-        fail(f"unknown account '{account}'; run ournewcli -account {account} login first")
+        fail(f"unknown account '{account}'; run cauth -account {account} login first")
     os.umask(0o077)
     if creating:
         root.mkdir(parents=True, exist_ok=True, mode=0o700)

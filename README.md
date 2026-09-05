@@ -1,6 +1,6 @@
-# Local Claude accounts
+# cauth
 
-`ournewcli` selects a named Claude Code profile for one invocation. Requires
+`cauth` selects a named Claude Code profile for one invocation. Requires
 Python 3.9+ and Claude Code on `PATH`. It uses `CLAUDE_CONFIG_DIR`; Claude handles
 OAuth login, credential storage, and refresh. It doesn't extract tokens or
 switch accounts when a command hits a usage limit.
@@ -8,14 +8,14 @@ switch accounts when a command hits a usage limit.
 Clone the repository and make the executable available in your current shell:
 
 ```sh
-git clone https://github.com/jhgaylor/claude-accounts.git
-cd claude-accounts
+git clone https://github.com/jhgaylor/cauth.git
+cd cauth
 export PATH="$PWD:$PATH"
-ournewcli -account first-account login --email first@example.com
-ournewcli -account second-account login --email second@example.com
-ournewcli -account third-account login --email third@example.com
-ournewcli -account first-account status
-ournewcli -account first-account claude -p "my prompt"
+cauth -account first-account login --email first@example.com
+cauth -account second-account login --email second@example.com
+cauth -account third-account login --email third@example.com
+cauth -account first-account status
+cauth -account first-account claude -p "my prompt"
 ```
 
 Complete Claude's browser authorization once for each profile. The email flag
@@ -30,16 +30,19 @@ To install the launcher permanently, symlink it into a directory on your PATH:
 
 ```sh
 mkdir -p "$HOME/.local/bin"
-ln -s "$PWD/ournewcli" "$HOME/.local/bin/ournewcli"
+ln -s "$PWD/cauth" "$HOME/.local/bin/cauth"
 ```
 
 Run that command from the cloned repository and keep the clone in place.
 Ensure `~/.local/bin` is on your shell's `PATH`. The symlink command deliberately
 fails if a launcher with that name already exists.
 
-Profiles default to `~/.config/ournewcli/accounts/NAME`, respecting
-`XDG_CONFIG_HOME`. `OURNEWCLI_HOME` overrides the root. Keep this path stable:
+Profiles default to `~/.config/cauth/accounts/NAME`, respecting
+`XDG_CONFIG_HOME`. `CAUTH_HOME` overrides the root. Keep this path stable:
 Claude also derives its macOS Keychain entry from the config directory.
+Existing `~/.config/ournewcli` profiles are reused when the new default root
+is absent, and `OURNEWCLI_HOME` remains a fallback for `CAUTH_HOME`. Existing
+logins therefore keep their original paths after the rename.
 Directories are created with private permissions. The launcher never reads
 credentials, and leaves your default Claude profile untouched.
 

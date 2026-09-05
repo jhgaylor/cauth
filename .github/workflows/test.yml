@@ -15,4 +15,4 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python3 -m unittest discover -s . -p 'test_*.py'
-      - run: ./ournewcli --help
+      - run: ./cauth --help

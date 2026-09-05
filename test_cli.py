@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 
-CLI = Path(__file__).with_name("ournewcli")
+CLI = Path(__file__).with_name("cauth")
 
 
 class AccountTests(unittest.TestCase):
@@ -32,7 +32,7 @@ sys.exit(int(os.environ.get("FIXTURE_EXIT", "0")))
 ''')
         fake.chmod(0o700)
         self.env = {"PATH": str(self.bin), "HOME": str(self.base),
-                    "OURNEWCLI_HOME": str(self.base / "profiles")}
+                    "CAUTH_HOME": str(self.base / "profiles")}
 
     def call(self, *args, env=None, input=""):
         return subprocess.run([sys.executable, str(CLI), *args],
@@ -99,6 +99,18 @@ sys.exit(int(os.environ.get("FIXTURE_EXIT", "0")))
         for command in ("status", "logout"):
             self.assertEqual(json.loads(self.call("-a", "first", command).stdout)["args"], ["auth", command])
         self.assertEqual(self.call("list").stdout, "first\n")
+
+    def test_legacy_profile_paths_remain_stable(self):
+        legacy = self.base / ".config" / "ournewcli"
+        (legacy / "accounts" / "existing").mkdir(parents=True, mode=0o700)
+        env = {key: value for key, value in self.env.items() if key != "CAUTH_HOME"}
+        self.assertEqual(self.call("list", env=env).stdout, "existing\n")
+        result = self.call("-a", "first", "login", env=env)
+        self.assertEqual(Path(json.loads(result.stdout)["profile"]), legacy.resolve() / "accounts" / "first")
+        result = self.call("-a", "second", "login", env={**env, "OURNEWCLI_HOME": str(legacy)})
+        self.assertEqual(Path(json.loads(result.stdout)["profile"]), legacy.resolve() / "accounts" / "second")
+        result = self.call("-a", "third", "login", env={**self.env, "OURNEWCLI_HOME": str(legacy)})
+        self.assertEqual(Path(json.loads(result.stdout)["profile"]), (self.base / "profiles").resolve() / "accounts" / "third")
 
     def test_missing_binary_and_invalid_invocations(self):
         (self.bin / "claude").unlink()
