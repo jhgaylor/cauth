@@ -95,8 +95,10 @@ def install_alias(root, account, name):
     path_dirs = {Path(part or os.curdir).expanduser().resolve()
                  for part in os.environ.get("PATH", "").split(os.pathsep)}
     if directory not in path_dirs:
-        print("Add its directory to your shell PATH:")
+        print(f"{directory} is not on PATH, so your shell cannot find '{name}' yet.")
+        print("For zsh or bash, add this line to ~/.zshrc (zsh) or ~/.bashrc (bash):")
         print("  export PATH=" + shlex.quote(str(directory)) + ':"$PATH"')
+        print("Then open a new terminal, or run that line now to use the alias in this shell.")
 
 
 def main(args):

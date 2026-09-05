@@ -52,7 +52,9 @@ They forward all arguments to `claude` using the selected account; `c1` alone
 starts an interactive session, and `c1 auth status` checks its login. Install
 one after creating the account profile with `login`. Set `CAUTH_BIN_DIR` to an
 absolute directory to install somewhere other than `~/.local/bin`. Add that
-directory to your shell startup file's PATH for use in new terminals.
+directory to your shell startup file's PATH for use in new terminals. If the
+install directory is missing from PATH, `cauth` prints the export line and
+instructions for adding it to `~/.zshrc` or `~/.bashrc` and using it immediately.
 
 An alias stores the account name, profile root, and absolute paths to this
 checkout's launcher and Python interpreter. Keep the checkout and interpreter
